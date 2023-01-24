@@ -82,3 +82,37 @@ def generate_cqr_data(n_train = 2000,n_test = 5000):
     
     return x_train_final, y_train_final, x_calib, y_calib, x_test, y_test
 
+
+def generate_ddim_cqr_data(n_train = 2000,n_test = 5000,d = 10):
+    def f(x):
+        ''' Construct data (1D example)
+        '''
+        ax = [0.0]*x.shape[0]
+        for i in range(x.shape[0]):
+            ax[i] = np.random.poisson(np.sin(x[i])**2+0.1) + 0.03*x[i]*np.random.randn(1)
+            ax[i] += 25*(np.random.uniform(0,1,1)<0.01)*np.random.randn(1)
+        return ax.astype(np.float32)
+
+    # training features
+    x_train = np.random.uniform(0, 5.0, size=n_train).astype(np.float32)
+
+    # test features
+    x_test = np.random.uniform(0, 5.0, size=n_test).astype(np.float32)
+
+    # generate labels
+    y_train = f(x_train)
+    y_test = f(x_test)
+
+    # reshape the features
+    x_train = np.reshape(x_train,(n_train,1))
+    x_test = np.reshape(x_test,(n_test,1))
+    
+    calibration_set_size = math.floor(0.5*n_train)
+    train_set_size = len(y_train) - calibration_set_size
+    x_train_final = x_train[ : train_set_size]
+    x_calib = x_train[train_set_size : ]
+    y_train_final = y_train[ : train_set_size]
+    y_calib = y_train[train_set_size : ]
+    
+    return x_train_final, y_train_final, x_calib, y_calib, x_test, y_test
+

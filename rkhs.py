@@ -51,11 +51,11 @@ def setup_full_cvx_dual(
 
     scores_const = cp.Constant(scores_calib.reshape(-1,1))
     
-    lamb = cp.Parameter(name="lambda", shape=(1,1))
+    radius = cp.Parameter(name="radius", shape=(1,1))
 
     L_const = cp.Constant(L)
 
-    C = lamb *  (n_calib)
+    C = radius / ( n_calib)
 
     constraints = [
         C * (alpha - 1) <= rkhs_weight,
@@ -83,7 +83,7 @@ def setup_cvx_dual(
     scores_param = cp.Parameter(name="score_impute", shape=(1,1))
     scores = cp.vstack([scores_const, scores_param])
     
-    lamb = cp.Parameter(name="lambda", shape=(1,1))
+    radius = cp.Parameter(name="radius", shape=(1,1))
 
     L_11_const = cp.Constant(
         np.hstack([L_11, np.zeros((L_11.shape[0], 1))])
@@ -91,7 +91,7 @@ def setup_cvx_dual(
     L_21_22_param = cp.Parameter(name="L_21_22", shape=(1, n_calib + 1))
     L = cp.vstack([L_11_const, L_21_22_param])
 
-    C = lamb *  (n_calib + 1)
+    C = radius / (n_calib+1)
 
     constraints = [
         C * (alpha - 1) <= rkhs_weight,
@@ -153,7 +153,7 @@ def finish_dual_setup(
     L_22 = np.sqrt(L_22)
     prob.param_dict['L_21_22'].value = np.hstack([L_21, L_22])
     
-    prob.param_dict['lambda'].value = np.asarray([[1/radius]])
+    prob.param_dict['radius'].value = np.asarray([[radius]])
     
     return prob
 
@@ -275,10 +275,10 @@ def compute_shifted_coverage(
     )[0,:]
     return est_coverage[0], np.average(obs_coverages, weights=g), np.asarray(thresholds).flatten()
 
-def runCV(x_calib,scores_calib,kernel,gamma,alpha,k,min_lamb = None,max_lamb=1, num_lamb = 20):
-    if min_lamb == None:
-        min_lamb = 1/len(scores_calib)
-    lambdas = np.linspace(min_lamb,max_lamb,num_lamb)
+def runCV(x_calib,scores_calib,kernel,gamma,alpha,k,min_radius = 1,max_radius=None, num_radii = 20):
+    if max_radius == None:
+        max_radius = len(scores_calib)
+    radii = np.linspace(min_radius,max_radius,num_radii)
         
     folds = KFold(n_splits = k)
     cvxProblemList = []
@@ -300,12 +300,12 @@ def runCV(x_calib,scores_calib,kernel,gamma,alpha,k,min_lamb = None,max_lamb=1, 
         ))
         
         
-    allLosses = np.zeros(len(lambdas))
+    allLosses = np.zeros(len(radii))
     countR = 0
-    for lamb in tqdm(lambdas):
+    for radius in tqdm(radii):
         i=0
         for i, (train_index, test_index) in enumerate(folds.split(x_calib)):        
-            cvxProblemList[i].param_dict['lambda'].value = np.asarray([[lamb]])
+            cvxProblemList[i].param_dict['radius'].value = np.asarray([[radius]])
             cvxProblemList[i].solve(
                 solver='MOSEK', 
                 verbose=False, 
@@ -322,7 +322,7 @@ def runCV(x_calib,scores_calib,kernel,gamma,alpha,k,min_lamb = None,max_lamb=1, 
         countR = countR + 1
         
         
-    return allLosses, lambdas
+    return allLosses, radii
             
 
         
