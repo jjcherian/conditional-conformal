@@ -60,7 +60,7 @@ def _compute_adaptive_threshold(
     return threshold, var_dict
 
 def compute_group_coverages(
-    x_calib, scores_calib, scores_test, groups_test, x_test, alpha, exact = False
+    x_calib, scores_calib, scores_test, groups_test, x_test, alpha, exact = False, eps = 0
 ):
     coverages = {i : [] for i in range(groups_test.shape[1])}
     coverages[-1] = []
@@ -69,18 +69,18 @@ def compute_group_coverages(
 
     for i in tqdm(range(len(x_test))):
         if not exact:
-            threshold, _ = _compute_adaptive_threshold(
+            threshold, var_dict = _compute_adaptive_threshold(
                 prob, x_test[i,:], np.max(scores_calib)
             )
         else:
-            threshold, _ = _compute_adaptive_threshold(
+            threshold, var_dict = _compute_adaptive_threshold(
                 prob, x_test[i,:], scores_test[i]
             )
-        coverage = scores_test[i] <= threshold
+        coverage = scores_test[i] <= threshold + eps
         for gp in np.where(groups_test[i] > 0)[0]:
             coverages[gp].append(coverage)
         coverages[-1].append(coverage)
-
+        
     return {gp : np.mean(coverages) for gp, coverages in coverages.items()}
 
 def compute_split_coverages(
@@ -98,8 +98,8 @@ def compute_split_coverages(
 
     return {gp : np.mean(coverages) for gp, coverages in split_coverages.items()}
 
-def compute_qr_coverages(
-    groups_train, groups_test, scores_train, scores_test, alpha
+def compute_group_qr_coverages(
+    groups_train, groups_test, scores_train, scores_test, alpha, eps = 0
     
 ):
     prob = setup_cvx_problem(groups_train[0:(len(scores_train)-1),:], scores_train[0:(len(scores_train)-1)], alpha)
@@ -114,7 +114,7 @@ def compute_qr_coverages(
     qr_coverages[-1] = []
 
     for i in (range(len(groups_test))):
-        coverage = scores_test[i] <= beta0 + beta@groups_test[i,:] 
+        coverage = scores_test[i] <= beta0 + beta@groups_test[i,:]  + eps
         for gp in np.where(groups_test[i] > 0)[0]:
             qr_coverages[gp].append(coverage)
         qr_coverages[-1].append(coverage)

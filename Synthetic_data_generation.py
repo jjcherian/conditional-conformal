@@ -49,7 +49,7 @@ def generate_group_synthetic_data(n, x_std, y_std, d, std_dev_list, theta, n_tes
 
 
 
-def generate_cqr_data(n_train = 2000,n_test = 5000):
+def generate_cqr_data(n_train = 2000,n_test = 5000,a=1,b=1):
     def f(x):
         ''' Construct data (1D example)
         '''
@@ -60,10 +60,10 @@ def generate_cqr_data(n_train = 2000,n_test = 5000):
         return ax.astype(np.float32)
 
     # training features
-    x_train = np.random.uniform(0, 5.0, size=n_train).astype(np.float32)
+    x_train = 5*np.random.beta(a, b, size=n_train).astype(np.float32)
 
     # test features
-    x_test = np.random.uniform(0, 5.0, size=n_test).astype(np.float32)
+    x_test = 5*np.random.beta(a, b, size=n_test).astype(np.float32)
 
     # generate labels
     y_train = f(x_train)
@@ -83,7 +83,7 @@ def generate_cqr_data(n_train = 2000,n_test = 5000):
     return x_train_final, y_train_final, x_calib, y_calib, x_test, y_test
 
 
-def generate_ddim_cqr_data(n_train = 2000,n_test = 5000,d = 10):
+def generate_ddim_cqr_data(n_train = 2000,n_test = 5000,d = 10): ### This function is not finished
     def f(x):
         ''' Construct data (1D example)
         '''
