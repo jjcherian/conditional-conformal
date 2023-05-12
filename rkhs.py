@@ -123,10 +123,11 @@ def setup_cvx_dual(
         constraints = [(alpha - 1) <= rkhs_weight,
                        alpha >= rkhs_weight,
                        rkhs_weight.T @ Z == 0]
-        prob = cp.Problem(
-                            cp.Minimize(-cp.sum(cp.multiply(rkhs_weight, cp.vec(scores)))),
-                                        constraints
-                        )
+        prob = cp.Problem
+        (
+            cp.Minimize(-cp.sum(cp.multiply(rkhs_weight, cp.vec(scores)))),
+            constraints
+        )
 
 
     return prob
@@ -344,6 +345,7 @@ def compute_shifted_coverage( ### Finish editing by incorporating z_calib and z_
             M = scores_test[i]
         else:
             M = None
+
         f_hat = compute_adaptive_threshold(
             prob,
             scores_calib,
