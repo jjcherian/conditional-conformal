@@ -6,7 +6,16 @@ conditional guarantees.
 For example, given a collection of groups $\mathcal{G}$, `conditionalconformal` issues
 a prediction set $\hat{C}(\cdot)$ satisfying
 
-$$\mathbb{P}(Y_{n + 1} \in \hat{C}(X_{n + 1}) \mid X \in G) \geq 1 - \alpha.$$ 
+$$\mathbb{P}(Y_{n + 1} \in \hat{C}(X_{n + 1}) \mid X \in G) \geq 1 - \alpha \quad \text{for all $G \in \mathcal{G}$}.$$ 
+
+Alternatively, given a collection of covariate shifts $\mathcal{F}$, the package issues
+a prediction set $\hat{C}(\cdot)$ satisfying 
+$$\mathbb{P}_f(Y_{n + 1} \in \hat{C}(X_{n + 1})) \geq 1 - \alpha \quad \text{for all $f \in \mathcal{F}$}.$$ 
+
+
+If the collection of shifts is unknown, we also provide a methodology
+for providing finite-sample conditional guarantees over arbitrary shifts. To query for the guarantee (which can
+depend on the shift of interest), we provide the `estimate_coverage` function.
 
 ## Installation
 
