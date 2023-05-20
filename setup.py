@@ -19,7 +19,7 @@ tags.sort()
 VERSION_FROM_GIT_TAG = tags[-1][1:]
 
 setup(
-    name="condconformal",
+    name="condtionalconformal",
     version=VERSION_FROM_GIT_TAG,  # Required
     setup_requires=["setuptools>=18.0"],
     packages=find_packages(exclude=["notebooks"]),  # Required
@@ -29,7 +29,6 @@ setup(
         "cvxpy",
 	"scikit-learn",
 	"matplotlib",
-	"statsmodels",
 	"tqdm"
     ],
     description="This package enables conformal prediction with conditional guarantees.",
