@@ -30,7 +30,7 @@ $ pip install .
 
 ## Examples
 
-The easiest way to start using fairaudit may be to go through the following notebook:
+The easiest way to start using conditionalconformal may be to go through the following notebook:
 
  * [Synthetic Data](https://github.com/jjcherian/conditional-conformal/blob/main/experiments/SyntheticData.ipynb)
 
