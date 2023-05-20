@@ -11,7 +11,7 @@ $$\mathbb{P}(Y_{n + 1} \in \hat{C}(X_{n + 1}) \mid X \in G) \geq 1 - \alpha \qua
 Alternatively, given a collection of covariate shifts $\mathcal{F}$, the package issues
 a prediction set $\hat{C}(\cdot)$ satisfying 
 
-$${\mathbb{P}}_f(Y_{n + 1} \in \hat{C}(X_{n + 1})) \geq 1 - \alpha \quad \text{for all $f \in \mathcal{F}$}.$$ 
+$$\mathbb{P}_ f(Y_{n + 1} \in \hat{C}(X_{n + 1})) \geq 1 - \alpha \quad \text{for all $f \in \mathcal{F}$}.$$ 
 
 
 If the collection of shifts is unknown, we also provide a methodology
