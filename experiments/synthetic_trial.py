@@ -6,8 +6,8 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 
-from gcc import GCC
-from synthetic_data import generate_cqr_data, indicator_matrix
+from conditionalconformal import CondConf
+from conditionalconformal.synthetic_data import generate_cqr_data, indicator_matrix
 
 # coverage on indicators of all sub-intervals with endpoints in [0,0.5,1,..,5]
 eps = 0.5
@@ -78,11 +78,11 @@ def run_trial(method, seed, x_train, y_train):
         phi_fn = phi_fn_intercept
         infinite_params = {'kernel': 'rbf', 'gamma': 12.5, 'lambda': 0.005}
 
-    cond_conf_ub = GCC(score_fn, phi_fn)
-    cond_conf_ub.set_function_class(1 - alpha/2, x_calib, y_calib, infinite_params)
+    cond_conf_ub = CondConf(score_fn, phi_fn)
+    cond_conf_ub.setup_problem(1 - alpha/2, x_calib, y_calib, infinite_params)
 
-    cond_conf_lb = GCC(score_fn, phi_fn)
-    cond_conf_lb.set_function_class(alpha/2, x_calib, y_calib, infinite_params)
+    cond_conf_lb = CondConf(score_fn, phi_fn)
+    cond_conf_lb.setup_problem(alpha/2, x_calib, y_calib, infinite_params)
 
     cov_ub = cond_conf_ub.verify_coverage(x_test, y_test)
     cov_lb = cond_conf_lb.verify_coverage(x_test, y_test)

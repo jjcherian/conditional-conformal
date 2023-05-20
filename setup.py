@@ -30,8 +30,7 @@ setup(
 	"scikit-learn",
 	"matplotlib",
 	"statsmodels",
-	"tqdm",
-	"torch"
+	"tqdm"
     ],
     description="This package enables conformal prediction with conditional guarantees.",
     long_description=long_description,

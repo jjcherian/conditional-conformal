@@ -5,4 +5,3 @@ seaborn
 cvxpy
 tqdm
 scikit-learn
-torch

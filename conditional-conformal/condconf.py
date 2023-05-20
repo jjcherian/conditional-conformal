@@ -7,22 +7,65 @@ from typing import Callable
 
 FUNCTION_DEFAULTS = {"kernel": None, "gamma" : 1, "lambda": 1}
 
-class GCC:
+class CondConf:
     def __init__(
             self, 
             score_fn : Callable,
-            Phi_fn : Callable
+            Phi_fn : Callable,
+            infinite_params : dict = {}
         ):
+        """
+        Constructs the CondConf object that caches relevant information for
+        generating conditionally valid prediction sets.
+
+        We define the score function and set of conditional guarantees
+        that we care about in this function.
+
+        Parameters
+        ---------
+        score_fn : Callable[np.ndarray, np.ndarray] -> np.ndarray
+            Fixed (vectorized) conformity score function that takes in
+            X and Y as inputs and returns S as output
+
+        Phi_fn : Callable[np.ndarray] -> np.ndarray
+            Function that defines finite basis set that we provide
+            exact conditional guarantees over
+        
+        infinite_params : dict = {}
+            Dictionary containing parameters for the RKHS component of the fit
+            Valid keys are ('kernel', 'gamma', 'lambda')
+                'kernel' should be a valid kernel name for sklearn.metrics.pairwise_kernels
+                'gamma' is a hyperparameter for certain kernels
+                'lambda' is the regularization penalty applied to the RKHS component
+        """
         self.score_fn = score_fn
         self.Phi_fn = Phi_fn
+        self.infinite_params = infinite_params
 
-    def set_function_class(
+    def setup_problem(
             self,
             alpha : float,
             x_calib : np.ndarray,
-            y_calib : np.ndarray,
-            infinite_params = {}
+            y_calib : np.ndarray
     ):
+        """
+        setup_problem sets up the final fitting problem for a given quantile alpha
+        and a calibration set
+
+        The resulting cvxpy Problem object is stored inside the CondConf parent.
+
+        Arguments
+        ---------
+        alpha : float 
+            Nominal quantile we are fitting
+
+        x_calib : np.ndarray
+            Covariate data for the calibration set
+
+        y_calib : np.ndarray
+            Labels for the calibration set
+
+        """
         self.x_calib = x_calib
         self.y_calib = y_calib
         self.phi_calib = self.Phi_fn(x_calib)
@@ -33,11 +76,10 @@ class GCC:
             self.x_calib,
             self.scores_calib,
             self.phi_calib,
-            infinite_params
+            self.infinite_params
         )
 
         self.alpha = alpha
-        self.infinite_params = infinite_params
         
 
     def predict(
@@ -47,6 +89,26 @@ class GCC:
             S_min : float = None,
             S_max : float = None
     ):
+        """
+        Returns the (conditionally valid) prediction set for a given 
+        test point
+
+        Arguments
+        ---------
+        x_test : np.ndarray
+            Single test point
+        score_inv_fn : Callable[float, np.ndarray] -> .
+            Function that takes in a score threshold S^* and test point x and 
+            outputs all values of y such that S(x, y) <= S^*
+        S_min : float = None
+            Lower bound (if available) on the conformity scores
+        S_max : float = None
+            Upper bound (if available) on the conformity scores
+
+        Returns
+        -------
+        prediction_set
+        """
         scores_calib = self.score_fn(self.x_calib, self.y_calib)
         if S_min is None:
             S_min = np.min(scores_calib)
@@ -66,7 +128,29 @@ class GCC:
             nominal_alpha : float,
             weights : np.ndarray,
             x : np.ndarray = None
-    ): 
+    ):
+        """
+        estimate_coverage estimates the true percentile of the issued estimate of the
+        conditional quantile under the covariate shift induced by 'weights'
+
+        If we are ostensibly estimating the 0.95-quantile using an RKHS fit, we may 
+        determine using our theory that the true percentile of this estimate is only 0.93
+
+        Arguments
+        ---------
+        nominal_alpha : float
+            Nominal quantile level
+        weights : np.ndarray
+            RKHS weights for tilt under which the coverage is estimated
+        x : np.ndarray = None
+            Points for which the RKHS weights are defined. If None, we assume
+            that weights corresponds to x_calib
+
+        Returns
+        -------
+        estimated_alpha : float
+            Our estimate for the realized quantile level
+        """
         weights = weights.reshape(-1,1)
         prob = setup_cvx_problem_calib(
             nominal_alpha,
@@ -102,6 +186,27 @@ class GCC:
             x : np.ndarray,
             score_inv_fn : Callable
     ):
+        """
+        If we do not wish to include the imputed data point, we can sanity check that
+        the regression is appropriately adaptive to the conditional variability in the data
+        by running a quantile regression on the calibration set without any imputation. 
+        When n_calib is large and the fit is stable, we expect these two sets to nearly coincide.
+
+        Arguments
+        ---------
+        alpha : float
+            Nominal quantile we are estimating
+        x : np.ndarray
+            Set of points for which we are issuing prediction sets
+        score_inv_fn : Callable[np.ndarray, np.ndarray] -> np.ndarray
+            Vectorized function that takes in a score threshold S^* and test point x and 
+            outputs all values of y such that S(x, y) <= S^*
+        
+        Returns
+        -------
+        prediction_sets
+        
+        """
         if len(x.shape) < 2:
             raise ValueError("x needs to have shape (m, n), not {x_test.shape}.")
 
@@ -134,6 +239,23 @@ class GCC:
             x : np.ndarray,
             y : np.ndarray
     ):
+        """
+        In some experiments, we may simply be interested in verifying the coverage of our method.
+        In this case, we do not need to binary search for the threshold S^*, but only need to verify that
+        S <= f_S(x) for the true value of S. This function implements this check for test points
+        denoted by x and y
+
+        Arguments
+        ---------
+        x : np.ndarray
+            A vector of test covariates
+        y : np.ndarray
+            A vector of test labels
+
+        Returns
+        -------
+        coverage_booleans : np.ndarray
+        """
         covers = []
         for x_val, y_val in zip(x, y):
             S_true = self.score_fn(x_val.reshape(-1,1), y_val)
