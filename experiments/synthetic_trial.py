@@ -78,14 +78,11 @@ def run_trial(method, seed, x_train, y_train):
         phi_fn = phi_fn_intercept
         infinite_params = {'kernel': 'rbf', 'gamma': 12.5, 'lambda': 0.005}
 
-    cond_conf_ub = CondConf(score_fn, phi_fn)
-    cond_conf_ub.setup_problem(1 - alpha/2, x_calib, y_calib, infinite_params)
+    cond_conf = CondConf(score_fn, phi_fn, infinite_params)
+    cond_conf.setup_problem(x_calib, y_calib)
 
-    cond_conf_lb = CondConf(score_fn, phi_fn)
-    cond_conf_lb.setup_problem(alpha/2, x_calib, y_calib, infinite_params)
-
-    cov_ub = cond_conf_ub.verify_coverage(x_test, y_test)
-    cov_lb = cond_conf_lb.verify_coverage(x_test, y_test)
+    cov_ub = cond_conf.verify_coverage(x_test, y_test, 1 - alpha/2)
+    cov_lb = cond_conf.verify_coverage(x_test, y_test, alpha/2)
 
     cov_gcc = (~cov_ub | cov_lb).flatten()
 

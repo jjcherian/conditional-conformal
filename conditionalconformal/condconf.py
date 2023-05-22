@@ -2,6 +2,7 @@ import cvxpy as cp
 import numpy as np
 
 from functools import partial
+from scipy.optimize import linprog
 from sklearn.metrics.pairwise import pairwise_kernels
 from typing import Callable
 
@@ -44,27 +45,22 @@ class CondConf:
 
     def setup_problem(
             self,
-            alpha : float,
             x_calib : np.ndarray,
             y_calib : np.ndarray
     ):
         """
-        setup_problem sets up the final fitting problem for a given quantile alpha
-        and a calibration set
+        setup_problem sets up the final fitting problem for a 
+        particular calibration set
 
         The resulting cvxpy Problem object is stored inside the CondConf parent.
 
         Arguments
         ---------
-        alpha : float 
-            Nominal quantile we are fitting
-
         x_calib : np.ndarray
             Covariate data for the calibration set
 
         y_calib : np.ndarray
             Labels for the calibration set
-
         """
         self.x_calib = x_calib
         self.y_calib = y_calib
@@ -72,18 +68,16 @@ class CondConf:
         self.scores_calib = self.score_fn(x_calib, y_calib)
 
         self.cvx_problem = setup_cvx_problem(
-            alpha,
             self.x_calib,
             self.scores_calib,
             self.phi_calib,
             self.infinite_params
         )
-
-        self.alpha = alpha
         
 
     def predict(
             self,
+            quantile : float,
             x_test : np.ndarray,
             score_inv_fn : Callable,
             S_min : float = None,
@@ -95,6 +89,8 @@ class CondConf:
 
         Arguments
         ---------
+        quantile : float
+            Nominal quantile level
         x_test : np.ndarray
             Single test point
         score_inv_fn : Callable[float, np.ndarray] -> .
@@ -115,17 +111,20 @@ class CondConf:
         if S_max is None:
             S_max = np.max(scores_calib)
 
-        _solve = partial(_solve_dual, gcc=self, x_test=x_test)
+        _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantile)
 
-        sol = find_first_zero(_solve, S_min, S_max * 2)
+        lower, upper = binary_search(_solve, S_min, S_max * 2)
 
-        threshold = self._get_threshold(sol, x_test)
+        if quantile < 0.5:
+            threshold = self._get_threshold(lower, x_test, quantile)
+        else:
+            threshold = self._get_threshold(upper, x_test, quantile)
 
         return score_inv_fn(threshold, x_test.reshape(-1,1))
 
     def estimate_coverage(
             self,
-            nominal_alpha : float,
+            quantile : float,
             weights : np.ndarray,
             x : np.ndarray = None
     ):
@@ -138,7 +137,7 @@ class CondConf:
 
         Arguments
         ---------
-        nominal_alpha : float
+        quantile : float
             Nominal quantile level
         weights : np.ndarray
             RKHS weights for tilt under which the coverage is estimated
@@ -153,7 +152,7 @@ class CondConf:
         """
         weights = weights.reshape(-1,1)
         prob = setup_cvx_problem_calib(
-            nominal_alpha,
+            quantile,
             self.x_calib,
             self.scores_calib,
             self.phi_calib,
@@ -178,11 +177,11 @@ class CondConf:
         inner_prod = weights.T @ K @ fitted_weights
         expectation = np.mean(weights.T @ K)
         penalty = self.infinite_params['lambda'] * (inner_prod / expectation)
-        return nominal_alpha - penalty
+        return quantile - penalty
     
     def predict_naive(
             self,
-            alpha : float,
+            quantile : float,
             x : np.ndarray,
             score_inv_fn : Callable
     ):
@@ -194,8 +193,8 @@ class CondConf:
 
         Arguments
         ---------
-        alpha : float
-            Nominal quantile we are estimating
+        quantile : float
+            Nominal quantile level
         x : np.ndarray
             Set of points for which we are issuing prediction sets
         score_inv_fn : Callable[np.ndarray, np.ndarray] -> np.ndarray
@@ -209,15 +208,14 @@ class CondConf:
         """
         if len(x.shape) < 2:
             raise ValueError("x needs to have shape (m, n), not {x_test.shape}.")
-
         prob = setup_cvx_problem_calib(
-            alpha,
+            quantile,
             self.x_calib,
             self.scores_calib,
             self.phi_calib,
             self.infinite_params
         )
-        prob.solve(solver="MOSEK")
+        prob.solve(solver="MOSEK", verbose=False)
 
         var_dict = {}
         var_dict['weights'] = prob.var_dict['weights'].value
@@ -237,7 +235,8 @@ class CondConf:
     def verify_coverage(
             self,
             x : np.ndarray,
-            y : np.ndarray
+            y : np.ndarray,
+            quantile : float
     ):
         """
         In some experiments, we may simply be interested in verifying the coverage of our method.
@@ -259,7 +258,7 @@ class CondConf:
         covers = []
         for x_val, y_val in zip(x, y):
             S_true = self.score_fn(x_val.reshape(-1,1), y_val)
-            threshold = self._get_threshold(S_true[0], x_val.reshape(-1,1))
+            threshold = self._get_threshold(S_true[0], x_val.reshape(-1,1), quantile)
             covers.append(S_true <= threshold)
 
         return np.asarray(covers)
@@ -267,22 +266,33 @@ class CondConf:
     def _get_threshold(
         self,
         S : float,
-        x : np.ndarray
+        x : np.ndarray,
+        quantile : float
     ):
-        prob = finish_dual_setup(
-            S,
-            self.cvx_problem,
-            x,
-            self.Phi_fn(x),
-            self.x_calib,
-            self.infinite_params
-        )
-        prob.solve(solver="MOSEK")
+        if self.infinite_params.get("kernel", FUNCTION_DEFAULTS['kernel']):
+            prob = finish_dual_setup(
+                self.cvx_problem,
+                S,
+                x,
+                quantile,
+                self.Phi_fn(x),
+                self.x_calib,
+                self.infinite_params
+            )
+            prob.solve(solver="MOSEK")
 
-        var_dict = {}
-        var_dict['weights'] = prob.var_dict['weights'].value
-        var_dict['c0'] = prob.constraints[-1].dual_value
-        threshold = self.Phi_fn(x) @ var_dict['c0']
+            weights = prob.var_dict['weights'].value
+            beta = prob.constraints[-1].dual_value
+        else:
+            S = np.concatenate([self.scores_calib, [S]])
+            Phi = np.concatenate([self.phi_calib, self.Phi_fn(x)], axis=0)
+            zeros = np.zeros((Phi.shape[1],))
+            bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
+            res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds,
+                          method='highs-ds', options={'presolve': False})
+            beta = -1 * res.eqlin.marginals
+
+        threshold = self.Phi_fn(x) @ beta
         if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
             K = pairwise_kernels(
                 X=np.concatenate([self.x_calib, x.reshape(1,-1)], axis=0),
@@ -290,11 +300,11 @@ class CondConf:
                 metric=self.infinite_params.get("kernel", FUNCTION_DEFAULTS["kernel"]),
                 gamma=self.infinite_params.get("gamma", FUNCTION_DEFAULTS["gamma"])
             )
-            threshold = (K @ var_dict['weights'])[-1] + threshold
+            threshold = (K @ weights)[-1] + threshold
         return threshold
+    
 
-
-def find_first_zero(func, min, max, tol=1e-3):
+def binary_search(func, min, max, tol=1e-3):
     min, max = float(min), float(max)
     assert (max + tol) > max
     while (max - min) > tol:
@@ -303,23 +313,37 @@ def find_first_zero(func, min, max, tol=1e-3):
             max = mid
         else:
             min = mid
-    return max
+    return min, max
 
-def _solve_dual(S, gcc, x_test):
+
+def _solve_dual(S, gcc, x_test, quantile):
     prob = finish_dual_setup(
-        S,
         gcc.cvx_problem,
+        S,
         x_test,
+        quantile,
         gcc.Phi_fn(x_test),
         gcc.x_calib,
         gcc.infinite_params
     )
-    prob.solve(solver="MOSEK")
-    return prob.var_dict['weights'].value[-1] - gcc.alpha
-        
+    if gcc.infinite_params.get('kernel', None):
+        prob.solve(solver="MOSEK")
+        weights = prob.var_dict['weights'].value
+    else:
+        S = np.concatenate([gcc.scores_calib, [S]], dtype=float)
+        Phi = np.concatenate([gcc.phi_calib, gcc.Phi_fn(x_test)], axis=0, dtype=float)
+        zeros = np.zeros((Phi.shape[1],))
+
+        bounds = [(quantile - 1, quantile)] * (len(gcc.scores_calib) + 1)
+        res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
+        weights = res.x
+
+    if quantile < 0.5:
+        return weights[-1] + (1 - quantile)
+    return weights[-1] - quantile
+
 
 def setup_cvx_problem(
-    alpha,
     x_calib, 
     scores_calib, 
     phi_calib,
@@ -330,6 +354,8 @@ def setup_cvx_problem(
         phi_calib = np.ones((n_calib,1))
         
     eta = cp.Variable(name="weights", shape=n_calib + 1)
+
+    quantile = cp.Parameter(name="quantile")
         
     scores_const = cp.Constant(scores_calib.reshape(-1,1))
     scores_param = cp.Parameter(name="S_test", shape=(1,1))
@@ -344,8 +370,8 @@ def setup_cvx_problem(
 
     if kernel is None: # no RKHS fitting
         constraints = [
-            (alpha - 1) <= eta,
-            alpha >= eta,
+            (quantile - 1) <= eta,
+            quantile >= eta,
             eta.T @ Phi == 0
         ]
         prob = cp.Problem(
@@ -365,9 +391,10 @@ def setup_cvx_problem(
     
         C = radius / (n_calib + 1)
 
+        # this is really C * (quantile - 1) and C * quantile
         constraints = [
-            C * (alpha - 1) <= eta,
-            C * alpha >= eta,
+            quantile - C <= eta,
+            quantile >= eta,
             eta.T @ Phi == 0]
         prob = cp.Problem(
                     cp.Minimize(0.5 * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
@@ -375,55 +402,8 @@ def setup_cvx_problem(
                 )
     return prob
 
-def setup_cvx_problem_calib(
-    alpha,
-    x_calib, 
-    scores_calib, 
-    phi_calib,
-    infinite_params = {}
-):
-    n_calib = len(scores_calib)
-    if phi_calib is None:
-        phi_calib = np.ones((n_calib,1))
-        
-    eta = cp.Variable(name="weights", shape=n_calib)
-        
-    scores = cp.Constant(scores_calib.reshape(-1,1))
-    
-    Phi = cp.Constant(phi_calib)
-
-    kernel = infinite_params.get("kernel", FUNCTION_DEFAULTS["kernel"])
-    gamma = infinite_params.get("gamma", FUNCTION_DEFAULTS["gamma"])
-
-    if kernel is None: # no RKHS fitting
-        constraints = [
-            (alpha - 1) <= eta,
-            alpha >= eta,
-            eta.T @ Phi == 0
-        ]
-        prob = cp.Problem(
-            cp.Minimize(-1 * cp.sum(cp.multiply(eta, cp.vec(scores)))),
-            constraints
-        )
-    else: # RKHS fitting
-        radius = 1 / infinite_params.get('lambda', FUNCTION_DEFAULTS['lambda'])
-
-        _, L = _get_kernel_matrix(x_calib, kernel, gamma)
-    
-        C = radius / (n_calib + 1)
-
-        constraints = [
-            C * (alpha - 1) <= eta,
-            C * alpha >= eta,
-            eta.T @ Phi == 0]
-        prob = cp.Problem(
-                    cp.Minimize(0.5 * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
-                    constraints
-                )
-    return prob
 
 def _get_kernel_matrix(x_calib, kernel, gamma):
-
     K = pairwise_kernels(
         X=x_calib,
         metric=kernel,
@@ -433,16 +413,19 @@ def _get_kernel_matrix(x_calib, kernel, gamma):
     K_chol = np.linalg.cholesky(K)
     return K, K_chol
 
+
 def finish_dual_setup(
+    prob : cp.Problem,
     S : np.ndarray, 
-    prob,
     X : np.ndarray,
+    quantile : float,
     Phi : np.ndarray,
     x_calib : np.ndarray,
     infinite_params = {}
 ):
     prob.param_dict['S_test'].value = np.asarray([[S]])
     prob.param_dict['Phi_test'].value = Phi.reshape(1,-1)
+    prob.param_dict['quantile'].value = quantile
 
     kernel = infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel'])
     gamma = infinite_params.get('gamma', FUNCTION_DEFAULTS['gamma'])
@@ -472,6 +455,56 @@ def finish_dual_setup(
         L_22 = np.sqrt(L_22)    
         prob.param_dict['L_21_22'].value = np.hstack([L_21, L_22])
     
-        prob.param_dict['radius'].value = radius    
+        prob.param_dict['radius'].value = radius
+
+        # update quantile definition for silly cvxpy reasons
+        prob.param_dict['quantile'].value *= radius / (len(x_calib) + 1)
     
+    return prob
+
+def setup_cvx_problem_calib(
+    quantile,
+    x_calib, 
+    scores_calib, 
+    phi_calib,
+    infinite_params = {}
+):
+    n_calib = len(scores_calib)
+    if phi_calib is None:
+        phi_calib = np.ones((n_calib,1))
+        
+    eta = cp.Variable(name="weights", shape=n_calib)
+        
+    scores = cp.Constant(scores_calib.reshape(-1,1))
+    
+    Phi = cp.Constant(phi_calib)
+
+    kernel = infinite_params.get("kernel", FUNCTION_DEFAULTS["kernel"])
+    gamma = infinite_params.get("gamma", FUNCTION_DEFAULTS["gamma"])
+
+    if kernel is None: # no RKHS fitting
+        constraints = [
+            (quantile - 1) <= eta,
+            quantile >= eta,
+            eta.T @ Phi == 0
+        ]
+        prob = cp.Problem(
+            cp.Minimize(-1 * cp.sum(cp.multiply(eta, cp.vec(scores)))),
+            constraints
+        )
+    else: # RKHS fitting
+        radius = 1 / infinite_params.get('lambda', FUNCTION_DEFAULTS['lambda'])
+
+        _, L = _get_kernel_matrix(x_calib, kernel, gamma)
+    
+        C = radius / (n_calib + 1)
+
+        constraints = [
+            C * (quantile - 1) <= eta,
+            C * quantile >= eta,
+            eta.T @ Phi == 0]
+        prob = cp.Problem(
+                    cp.Minimize(0.5 * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
+                    constraints
+                )
     return prob
