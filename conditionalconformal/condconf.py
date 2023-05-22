@@ -208,27 +208,35 @@ class CondConf:
         """
         if len(x.shape) < 2:
             raise ValueError("x needs to have shape (m, n), not {x_test.shape}.")
-        prob = setup_cvx_problem_calib(
-            quantile,
-            self.x_calib,
-            self.scores_calib,
-            self.phi_calib,
-            self.infinite_params
-        )
-        prob.solve(solver="MOSEK", verbose=False)
-
-        var_dict = {}
-        var_dict['weights'] = prob.var_dict['weights'].value
-        var_dict['c0'] = prob.constraints[-1].dual_value
-        threshold = self.Phi_fn(x) @ var_dict['c0']
+        
         if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
+            prob = setup_cvx_problem_calib(
+                quantile,
+                self.x_calib,
+                self.scores_calib,
+                self.phi_calib,
+                self.infinite_params
+            )
+            prob.solve(solver="MOSEK", verbose=False)
+
+            weights = prob.var_dict['weights'].value
+            beta = prob.constraints[-1].dual_value
             K = pairwise_kernels(
                 X=x,
                 Y=self.x_calib,
                 metric=self.infinite_params.get("kernel", FUNCTION_DEFAULTS["kernel"]),
                 gamma=self.infinite_params.get("gamma", FUNCTION_DEFAULTS["gamma"])
             )
-            threshold = (K @ var_dict['weights']) + threshold
+            threshold = K @ weights + self.Phi_fn(x) @ beta
+        else:
+            S = np.concatenate([self.scores_calib, [S]], dtype=float)
+            Phi = self.phi_calib.astype(float)
+            zeros = np.zeros((Phi.shape[1],))
+
+            bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
+            res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
+            beta = -1 * res.eqlin.marginals
+            threshold = self.Phi_fn(x) @ beta
 
         return score_inv_fn(threshold, x)
     
@@ -250,6 +258,8 @@ class CondConf:
             A vector of test covariates
         y : np.ndarray
             A vector of test labels
+        quantile : float
+            Nominal quantile level
 
         Returns
         -------
@@ -335,7 +345,8 @@ def _solve_dual(S, gcc, x_test, quantile):
         zeros = np.zeros((Phi.shape[1],))
 
         bounds = [(quantile - 1, quantile)] * (len(gcc.scores_calib) + 1)
-        res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
+        res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, 
+                      method='highs', options={'presolve': False})
         weights = res.x
 
     if quantile < 0.5:

@@ -75,28 +75,27 @@ class CondConf:
 
     def setup_problem(
             self,
-            alpha : float,
             x_calib : np.ndarray,
             y_calib : np.ndarray
     ):
         """
-        setup_problem sets up the final fitting problem for a given quantile alpha
-        and a calibration set
+        setup_problem sets up the final fitting problem for a 
+        particular calibration set
 
         The resulting cvxpy Problem object is stored inside the CondConf parent.
 
         Arguments
         ---------
-        alpha : float 
-            Nominal quantile we are fitting
         x_calib : np.ndarray
             Covariate data for the calibration set
+
         y_calib : np.ndarray
             Labels for the calibration set
         """
 
     def predict(
             self,
+            quantile : float,
             x_test : np.ndarray,
             score_inv_fn : Callable,
             S_min : float = None,
@@ -108,6 +107,8 @@ class CondConf:
 
         Arguments
         ---------
+        quantile : float
+            Nominal quantile level
         x_test : np.ndarray
             Single test point
         score_inv_fn : Callable[float, np.ndarray] -> .
@@ -125,7 +126,7 @@ class CondConf:
     
     def estimate_coverage(
             self,
-            nominal_alpha : float,
+            quantile : float,
             weights : np.ndarray,
             x : np.ndarray = None
     ):
@@ -138,7 +139,7 @@ class CondConf:
 
         Arguments
         ---------
-        nominal_alpha : float
+        quantile : float
             Nominal quantile level
         weights : np.ndarray
             RKHS weights for tilt under which the coverage is estimated
@@ -154,7 +155,7 @@ class CondConf:
     
     def predict_naive(
             self,
-            alpha : float,
+            quantile : float,
             x : np.ndarray,
             score_inv_fn : Callable
     ):
@@ -166,8 +167,8 @@ class CondConf:
 
         Arguments
         ---------
-        alpha : float
-            Nominal quantile we are estimating
+        quantile : float
+            Nominal quantile level
         x : np.ndarray
             Set of points for which we are issuing prediction sets
         score_inv_fn : Callable[np.ndarray, np.ndarray] -> np.ndarray
@@ -183,7 +184,8 @@ class CondConf:
     def verify_coverage(
             self,
             x : np.ndarray,
-            y : np.ndarray
+            y : np.ndarray,
+            quantile : float
     ):
         """
         In some experiments, we may simply be interested in verifying the coverage of our method.
@@ -197,6 +199,8 @@ class CondConf:
             A vector of test covariates
         y : np.ndarray
             A vector of test labels
+        quantile : float
+            Nominal quantile level
 
         Returns
         -------
