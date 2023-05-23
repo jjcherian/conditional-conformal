@@ -214,10 +214,10 @@ If you use this code in a research project, please cite the forthcoming paper.
 ```
 @article{gibbs2023conformal,
     title={Conformal Prediction with Conditional Guarantees},
-    author={Isaac Gibbs, John Cherian, Emmanuel Cand\`es},
+    author={Isaac Gibbs, John J. Cherian, Emmanuel J. Cand\`es},
     publisher = {arXiv},
     year = {2023},
-    note = {arXiv:XXXX.XXXX [stat.ME]},
-    url = {https://arxiv.org/abs/XXXX.XXXXX},
+    note = {arXiv:2305.12616 [stat.ME]},
+    url = {https://arxiv.org/abs/2305.12616},
 }
 ``` 
