@@ -158,7 +158,10 @@ class CondConf:
             self.phi_calib,
             self.infinite_params
         )
-        prob.solve(solver="MOSEK")
+        if "MOSEK" in cp.installed_solvers():
+            prob.solve(solver="MOSEK")
+        else:
+            prob.solve()
 
         fitted_weights = prob.var_dict['weights'].value
         if x is not None:
@@ -217,7 +220,10 @@ class CondConf:
                 self.phi_calib,
                 self.infinite_params
             )
-            prob.solve(solver="MOSEK", verbose=False)
+            if "MOSEK" in cp.installed_solvers():
+                prob.solve(solver="MOSEK", verbose=False)
+            else:
+                prob.solve()
 
             weights = prob.var_dict['weights'].value
             beta = prob.constraints[-1].dual_value
@@ -289,7 +295,10 @@ class CondConf:
                 self.x_calib,
                 self.infinite_params
             )
-            prob.solve(solver="MOSEK")
+            if "MOSEK" in cp.installed_solvers():
+                prob.solve(solver="MOSEK")
+            else:
+                prob.solve()
 
             weights = prob.var_dict['weights'].value
             beta = prob.constraints[-1].dual_value
@@ -337,7 +346,10 @@ def _solve_dual(S, gcc, x_test, quantile):
         gcc.infinite_params
     )
     if gcc.infinite_params.get('kernel', None):
-        prob.solve(solver="MOSEK")
+        if "MOSEK" in cp.installed_solvers():
+            prob.solve(solver="MOSEK")
+        else:
+            prob.solve()
         weights = prob.var_dict['weights'].value
     else:
         S = np.concatenate([gcc.scores_calib, [S]], dtype=float)
