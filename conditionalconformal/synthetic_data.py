@@ -3,6 +3,8 @@ import numpy as np
 def generate_cqr_data(seed,n_train=2000,n_calib=500,n_test=500):
     np.random.seed(seed)
 
+    n_train = n_train + n_calib
+
     def f(x):
         ''' Construct data (1D example)
         '''
@@ -26,7 +28,7 @@ def generate_cqr_data(seed,n_train=2000,n_calib=500,n_test=500):
     x_train = np.reshape(x_train,(n_train,1))
     x_test = np.reshape(x_test,(n_test,1))
     
-    train_set_size = len(y_train) - calibration_set_size
+    train_set_size = len(y_train) - n_calib
     x_train_final = x_train[ : train_set_size]
     x_calib = x_train[train_set_size : ]
     y_train_final = y_train[ : train_set_size]
