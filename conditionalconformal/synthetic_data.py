@@ -1,13 +1,6 @@
 import numpy as np
 
-def generate_cqr_data(seed):
-    # number of training examples
-    n_train = 2000
-    # number of calibration points
-    calibration_set_size = 500
-    # number of test examples (to evaluate average coverage and length)
-    n_test = 500
-    
+def generate_cqr_data(seed,n_train=2000,n_calib=500,n_test=500):
     np.random.seed(seed)
 
     def f(x):
