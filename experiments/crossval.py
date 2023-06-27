@@ -4,6 +4,7 @@ from sklearn.metrics.pairwise import pairwise_kernels
 from sklearn.model_selection import KFold
 from conditionalconformal.condconf import setup_cvx_problem_calib
 
+### Run cross validation to determine the hyperparameter in front of the kernel penalty
 def runCV(XCalib,scoresCalib,kernel,gamma,alpha,k,minRad,maxRad,numRad,phiCalib):    
     radii = np.linspace(minRad,maxRad,numRad)
         
@@ -16,8 +17,7 @@ def runCV(XCalib,scoresCalib,kernel,gamma,alpha,k,minRad,maxRad,numRad,phiCalib)
             metric=kernel,
             gamma=gamma
         ))
-        
-        
+               
     allLosses = np.zeros(len(radii))
     countR = 0
     for radius in radii:

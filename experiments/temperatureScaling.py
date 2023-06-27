@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Mar  6 13:20:02 2023
-
-@author: isaacgibbs
-"""
-
 import numpy as np
 import torch
 import torch.nn as nn
