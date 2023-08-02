@@ -1,3 +1,23 @@
 [build-system]
 requires = ["setuptools >= 18.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "conditionalconformal"
+version = "0.0.1"
+authors = [
+  { name="John Cherian", email="jcherian@stanford.edu" },
+  { name="Isaac Gibbs", email="igibbs@stanford.edu" }
+]
+description = "This package enables conformal prediction with conditional guarantees."
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/jjcherian/conditionalconformal"
+"Bug Tracker" = "https://github.com/jjcherian/conditionalconformal/issues"

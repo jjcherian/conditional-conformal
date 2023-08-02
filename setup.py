@@ -15,12 +15,10 @@ git_tags.stdout.close()
 tags = tags.decode("utf-8").split("\n")
 tags.sort()
 
-# PEP 440 won't accept the v in front, so here we remove it, strip the new line and decode the byte stream
-VERSION_FROM_GIT_TAG = tags[-1][1:]
 
 setup(
     name="condtionalconformal",
-    version=VERSION_FROM_GIT_TAG,  # Required
+    version="0.0.1",  # Required
     setup_requires=["setuptools>=18.0"],
     packages=find_packages(exclude=["notebooks"]),  # Required
     install_requires=[

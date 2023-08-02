@@ -20,12 +20,10 @@ depend on the shift of interest), we provide the `estimate_coverage` function.
 
 ## Installation
 
-conditionalconformal can be installed (locally for now) with pip.
-
-To install with pip, navigate to the directory for this repo and
+conditionalconformal can be installed with pip.
 
 ```bash
-$ pip install . 
+$ pip install conditionalconformal
 ```
 
 ## Examples

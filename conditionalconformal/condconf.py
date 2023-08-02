@@ -349,7 +349,7 @@ def _solve_dual(S, gcc, x_test, quantile):
         if "MOSEK" in cp.installed_solvers():
             prob.solve(solver="MOSEK")
         else:
-            prob.solve()
+            prob.solve(solver="OSQP")
         weights = prob.var_dict['weights'].value
     else:
         S = np.concatenate([gcc.scores_calib, [S]], dtype=float)
