@@ -13,7 +13,8 @@ class CondConf:
             self, 
             score_fn : Callable,
             Phi_fn : Callable,
-            infinite_params : dict = {}
+            infinite_params : dict = {},
+            seed : int = 0
         ):
         """
         Constructs the CondConf object that caches relevant information for
@@ -42,6 +43,7 @@ class CondConf:
         self.score_fn = score_fn
         self.Phi_fn = Phi_fn
         self.infinite_params = infinite_params
+        self.rng = np.random.default_rng(seed=seed)
 
     def setup_problem(
             self,
@@ -81,7 +83,8 @@ class CondConf:
             x_test : np.ndarray,
             score_inv_fn : Callable,
             S_min : float = None,
-            S_max : float = None
+            S_max : float = None,
+            randomize : bool = False
     ):
         """
         Returns the (conditionally valid) prediction set for a given 
@@ -110,8 +113,11 @@ class CondConf:
             S_min = np.min(scores_calib)
         if S_max is None:
             S_max = np.max(scores_calib)
-
-        _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantile)
+        if randomize:
+            threshold = self.rng.uniform(low=quantile - 1, high=quantile)
+        else:
+            threshold = quantile
+        _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantile, threshold=threshold)
 
         lower, upper = binary_search(_solve, S_min, S_max * 2)
 
@@ -250,7 +256,8 @@ class CondConf:
             self,
             x : np.ndarray,
             y : np.ndarray,
-            quantile : float
+            quantile : float,
+            randomize : bool = False
     ):
         """
         In some experiments, we may simply be interested in verifying the coverage of our method.
@@ -273,13 +280,50 @@ class CondConf:
         """
         covers = []
         for x_val, y_val in zip(x, y):
-            S_true = self.score_fn(x_val.reshape(-1,1), y_val)
-            threshold = self._get_threshold(S_true[0], x_val.reshape(-1,1), quantile)
-            covers.append(S_true <= threshold)
+            S_true = self.score_fn(x_val.reshape(1,-1), y_val)
+            eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantile)
+            if randomize:
+                threshold = self.rng.uniform(low=quantile - 1, high=quantile)
+            else:
+                threshold = quantile
+            covers.append(eta[-1] < threshold)
 
         return np.asarray(covers)
+  
+    def _get_dual_solution(
+        self,
+        S : float,
+        x : np.ndarray,
+        quantile : float
+    ):
+        if self.infinite_params.get("kernel", FUNCTION_DEFAULTS['kernel']):
+            prob = finish_dual_setup(
+                self.cvx_problem,
+                S,
+                x,
+                quantile,
+                self.Phi_fn(x),
+                self.x_calib,
+                self.infinite_params
+            )
+            if "MOSEK" in cp.installed_solvers():
+                prob.solve(solver="MOSEK")
+            else:
+                prob.solve()
+            # TODO: THIS IS WRONG
+            raise ValueError("need to get variable out of problem and return its value")
+        else:
+            S = np.concatenate([self.scores_calib, [S]])
+            Phi = np.concatenate([self.phi_calib, self.Phi_fn(x)], axis=0)
+            zeros = np.zeros((Phi.shape[1],))
+            bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
+            res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds,
+                          method='highs-ds', options={'presolve': False})
+            eta = res.x
+        return eta
     
-    def _get_threshold(
+    
+    def _get_primal_solution(
         self,
         S : float,
         x : np.ndarray,
@@ -310,6 +354,16 @@ class CondConf:
             res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds,
                           method='highs-ds', options={'presolve': False})
             beta = -1 * res.eqlin.marginals
+            weights = None
+        return beta, weights
+    
+    def _get_threshold(
+        self,
+        S : float,
+        x : np.ndarray,
+        quantile : float
+    ):
+        beta, weights = self._get_primal_solution(S, x, quantile)
 
         threshold = self.Phi_fn(x) @ beta
         if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
@@ -335,7 +389,7 @@ def binary_search(func, min, max, tol=1e-3):
     return min, max
 
 
-def _solve_dual(S, gcc, x_test, quantile):
+def _solve_dual(S, gcc, x_test, quantile, threshold=None):
     prob = finish_dual_setup(
         gcc.cvx_problem,
         S,
@@ -361,9 +415,14 @@ def _solve_dual(S, gcc, x_test, quantile):
                       method='highs', options={'presolve': False})
         weights = res.x
 
-    if quantile < 0.5:
-        return weights[-1] + (1 - quantile)
-    return weights[-1] - quantile
+    if threshold is None:
+        if quantile < 0.5:
+            threshold = quantile - 1
+        else:
+            threshold = quantile
+    # if quantile < 0.5:
+    #     return weights[-1] + (1 - quantile)
+    return weights[-1] - threshold
 
 
 def setup_cvx_problem(

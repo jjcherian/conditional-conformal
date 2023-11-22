@@ -1,10 +1,10 @@
 import numpy as np
 
-def generate_cqr_data(seed,n_train=1500,n_calib=500,n_test=500):
+def generate_cqr_data(seed,n_train=2000,n_calib=500,n_test=500):
     np.random.seed(seed)
 
     n_train = n_train + n_calib
-
+    
     def f(x):
         ''' Construct data (1D example)
         '''
