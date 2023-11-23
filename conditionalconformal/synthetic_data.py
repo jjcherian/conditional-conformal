@@ -1,6 +1,6 @@
 import numpy as np
 
-def generate_cqr_data(seed,n_train=2000,n_calib=500,n_test=500):
+def generate_cqr_data(seed,n_train=2000,n_calib=1000,n_test=500):
     np.random.seed(seed)
 
     n_train = n_train + n_calib
