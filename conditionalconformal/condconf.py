@@ -218,6 +218,8 @@ class CondConf:
         prediction_set
         """
         if randomize:
+            if exact:
+                raise ValueError("Exact computation doesn't support randomization for now.")
             threshold = self.rng.uniform(low=quantile - 1, high=quantile)
         else:
             if quantile < 0.5:
@@ -226,6 +228,8 @@ class CondConf:
                 threshold = quantile
         
         if exact:
+            if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
+                raise ValueError("Exact computation doesn't support RKHS quantile regression for now.")
             naive_duals, naive_primals = self._get_calibration_solution(
                 quantile
             )
