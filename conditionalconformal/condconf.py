@@ -116,7 +116,10 @@ class CondConf:
         if randomize:
             threshold = self.rng.uniform(low=quantile - 1, high=quantile)
         else:
-            threshold = quantile
+            if quantile < 0.5:
+                threshold = quantile - 1
+            else:
+                threshold = quantile 
         _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantile, threshold=threshold)
 
         lower, upper = binary_search(_solve, S_min, S_max * 2)
@@ -382,7 +385,7 @@ def binary_search(func, min, max, tol=1e-3):
     assert (max + tol) > max
     while (max - min) > tol:
         mid = (min + max) / 2
-        if np.isclose(func(mid), 0):
+        if func(mid) > 0:
             max = mid
         else:
             min = mid
