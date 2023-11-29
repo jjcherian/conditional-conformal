@@ -121,16 +121,20 @@ class CondConf:
         phi = np.concatenate((self.phi_calib, phi_test.reshape(1,-1)), axis=0)
         S = np.concatenate((self.scores_calib.reshape(-1,1), S_test.reshape(-1,1)), axis=0)
 
-        cur_idx = phi.shape[0] - 1
+        candidate_idx = phi.shape[0] - 1
 
         while True:
-            direction = -1 * np.linalg.solve(phi[basis].T, phi[cur_idx].reshape(-1,1)).flatten()
+            # get direction vector for dual variable step
+            direction = -1 * np.linalg.solve(phi[basis].T, phi[candidate_idx].reshape(-1,1)).flatten()
+
+            # only consider non-zero entries of the direction vector
             active_indices = ~np.isclose(direction, 0)
             active_direction = direction[active_indices]
             active_basis = basis.copy()
             active_basis[np.where(basis)[0][~active_indices]] = False
-            positive_step = True if duals[cur_idx] <= 0 else False
-            if cur_idx == phi.shape[0] - 1:
+
+            positive_step = True if duals[candidate_idx] <= 0 else False
+            if candidate_idx == phi.shape[0] - 1:
                 positive_step = True if dual_threshold >= 0 else False
 
             if positive_step:
@@ -149,18 +153,27 @@ class CondConf:
                 departing_idx = np.where(active_basis)[0][np.argmax(gap_to_bounds)]
             step_size_clip = np.clip(
                 step_size, 
-                a_max=quantile - duals[cur_idx], 
-                a_min=(quantile - 1) - duals[cur_idx]
+                a_max=quantile - duals[candidate_idx], 
+                a_min=(quantile - 1) - duals[candidate_idx]
             )
 
             duals[basis] += step_size_clip * direction
-            duals[cur_idx] += step_size_clip
+            duals[candidate_idx] += step_size_clip
+
+            if dual_threshold > 0 and duals[-1] > dual_threshold:
+                break
+
+            if dual_threshold < 0 and duals[-1] < dual_threshold:
+                break
+
             if step_size_clip == step_size:
                 basis[departing_idx] = False
-                basis[cur_idx] = True
-
+                basis[candidate_idx] = True
+            
             if np.isclose(duals[-1], dual_threshold):
                 break
+
+            # TODO: make this a SMW update and reuse in the direction vector calc...
             reduced_A = np.linalg.solve(phi[basis].T, phi[~basis].T)
             reduced_costs = (S[~basis].T - S[basis].T @ reduced_A).flatten()
             bottom = reduced_A[-1]
@@ -174,10 +187,10 @@ class CondConf:
                 S[-1] = np.inf if quantile >= 0.5 else -np.inf
                 break
             if dual_threshold >= 0:
-                cur_idx = np.where(~basis)[0][np.where(~ignore_entries, req_change, np.inf).argmin()]
+                candidate_idx = np.where(~basis)[0][np.where(~ignore_entries, req_change, np.inf).argmin()]
                 S[-1] += np.min(req_change[~ignore_entries])
             else:
-                cur_idx = np.where(~basis)[0][np.where(~ignore_entries, req_change, -np.inf).argmax()]
+                candidate_idx = np.where(~basis)[0][np.where(~ignore_entries, req_change, -np.inf).argmax()]
                 S[-1] += np.max(req_change[~ignore_entries])
         return S[-1]
 
@@ -218,8 +231,6 @@ class CondConf:
         prediction_set
         """
         if randomize:
-            if exact:
-                raise ValueError("Exact computation doesn't support randomization for now.")
             threshold = self.rng.uniform(low=quantile - 1, high=quantile)
         else:
             if quantile < 0.5:
