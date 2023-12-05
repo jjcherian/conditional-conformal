@@ -103,14 +103,23 @@ class CondConf:
             dual_threshold
     ):
         def get_current_basis(primals, duals, Phi, S, quantile):
-            interp_bools = np.logical_and(
-                ~np.isclose(duals, quantile - 1),
-                ~np.isclose(duals, quantile)
-            )
+            interp_bools = np.logical_and(~np.isclose(duals, quantile - 1),~np.isclose(duals, quantile))
             if np.sum(interp_bools) == Phi.shape[1]:
                 return interp_bools
             preds = (Phi @ primals).flatten()
-            interp_bools = np.isclose(S, preds)
+            active_indices = np.where(interp_bools)[0]
+            interp_indices = np.argsort(np.abs(S - preds))[0:Phi.shape[1]]
+            diff_indices = np.setdiff1d(interp_indices, active_indices)
+            num_missing = Phi.shape[1] - np.sum(interp_bools)
+            if num_missing < len(diff_indices):
+                from itertools import combinations
+                for cand_indices in combinations(diff_indices, num_missing):
+                    cand_phi = Phi[np.concatenate((active_indices, cand_indices))]
+                    if np.isfinite(np.linalg.cond(cand_phi)):
+                        interp_bools[np.asarray(cand_indices)] = True
+                        break
+            else:
+                interp_bools[diff_indices] = True
             return interp_bools
                 
         basis = get_current_basis(primals, duals, self.phi_calib, self.scores_calib, quantile)
@@ -418,14 +427,40 @@ class CondConf:
         coverage_booleans : np.ndarray
         """
         covers = []
-        for x_val, y_val in zip(x, y):
-            S_true = self.score_fn(x_val.reshape(1,-1), y_val)
-            eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantile)
-            if randomize:
-                threshold = self.rng.uniform(low=quantile - 1, high=quantile)
-            else:
-                threshold = quantile
-            covers.append(eta[-1] < threshold)
+
+        if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):        
+            for x_val, y_val in zip(x, y):
+                S_true = self.score_fn(x_val.reshape(1,-1), y_val)
+                eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantile)
+                if randomize:
+                    threshold = self.rng.uniform(low=quantile - 1, high=quantile)
+                else:
+                    threshold = quantile
+                if quantile > 0.5:
+                    covers.append(eta[-1] < threshold)
+                else:
+                    covers.append(eta[-1] > threshold)
+        else:
+            for x_val, y_val in zip(x, y):
+                S_true = self.score_fn(x_val.reshape(1,-1), y_val)
+                naive_duals, naive_primals = self._get_calibration_solution(
+                    quantile
+                )
+                if randomize:
+                    threshold = self.rng.uniform(low=quantile - 1, high=quantile)
+                else:
+                    threshold = quantile
+                score_cutoff = self._compute_exact_cutoff(
+                    quantile,
+                    naive_primals,
+                    naive_duals,
+                    self.Phi_fn(x_val),
+                    threshold
+                )            
+                if quantile > 0.5:
+                    covers.append(S_true < score_cutoff)
+                else:
+                    covers.append(S_true > score_cutoff)    
 
         return np.asarray(covers)
   
