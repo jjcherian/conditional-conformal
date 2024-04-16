@@ -405,7 +405,9 @@ class CondConf:
             x : np.ndarray,
             y : np.ndarray,
             quantile : float,
-            randomize : bool = False
+            randomize : bool = False,
+            resolve : bool = False,
+            return_dual : bool = False
     ):
         """
         In some experiments, we may simply be interested in verifying the coverage of our method.
@@ -421,12 +423,15 @@ class CondConf:
             A vector of test labels
         quantile : float
             Nominal quantile level
+        resolve : bool
+            Resolve LP/QP with posited value to determine coverage
 
         Returns
         -------
         coverage_booleans : np.ndarray
         """
         covers = []
+        duals = []
 
         if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):        
             for x_val, y_val in zip(x, y):
@@ -434,34 +439,51 @@ class CondConf:
                 eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantile)
                 if randomize:
                     threshold = self.rng.uniform(low=quantile - 1, high=quantile)
-                else:
+                elif quantile > 0.5:
                     threshold = quantile
+                else:
+                    threshold = quantile - 1
                 if quantile > 0.5:
                     covers.append(eta[-1] < threshold)
                 else:
                     covers.append(eta[-1] > threshold)
+                duals.append(eta[-1])
+
         else:
             for x_val, y_val in zip(x, y):
-                S_true = self.score_fn(x_val.reshape(1,-1), y_val)
-                naive_duals, naive_primals = self._get_calibration_solution(
-                    quantile
-                )
                 if randomize:
                     threshold = self.rng.uniform(low=quantile - 1, high=quantile)
-                else:
+                elif quantile > 0.5:
                     threshold = quantile
-                score_cutoff = self._compute_exact_cutoff(
-                    quantile,
-                    naive_primals,
-                    naive_duals,
-                    self.Phi_fn(x_val),
-                    threshold
-                )            
-                if quantile > 0.5:
-                    covers.append(S_true < score_cutoff)
                 else:
-                    covers.append(S_true > score_cutoff)    
+                    threshold = quantile - 1
 
+                S_true = self.score_fn(x_val.reshape(1,-1), y_val)
+                if resolve:
+                    eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantile)
+                    if quantile > 0.5:
+                        covers.append(eta[-1] < threshold)
+                    else:
+                        covers.append(eta[-1] > threshold)
+                    duals.append(eta[-1])
+                else:
+                    naive_duals, naive_primals = self._get_calibration_solution(
+                        quantile
+                    )
+                    score_cutoff = self._compute_exact_cutoff(
+                        quantile,
+                        naive_primals,
+                        naive_duals,
+                        self.Phi_fn(x_val),
+                        threshold
+                    )            
+                    if quantile > 0.5:
+                        covers.append(S_true < score_cutoff)
+                    else:
+                        covers.append(S_true > score_cutoff)
+                    duals.append(np.nan)
+        if return_dual:
+            return np.asarray(covers), np.asarray(duals)
         return np.asarray(covers)
   
     def _get_dual_solution(
