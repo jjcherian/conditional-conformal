@@ -13,6 +13,7 @@ class CondConf:
             self, 
             score_fn : Callable,
             Phi_fn : Callable,
+            quantile_fn : Callable = None,
             infinite_params : dict = {},
             seed : int = 0
         ):
@@ -42,6 +43,7 @@ class CondConf:
         """
         self.score_fn = score_fn
         self.Phi_fn = Phi_fn
+        self.quantile_fn = quantile_fn
         self.infinite_params = infinite_params
         self.rng = np.random.default_rng(seed=seed)
 
@@ -69,6 +71,9 @@ class CondConf:
         self.phi_calib = self.Phi_fn(x_calib)
         self.scores_calib = self.score_fn(x_calib, y_calib)
 
+        if self.quantile_fn is not None:
+            self.quantile_calib = self.quantile_fn(x_calib).reshape(-1,1)
+
         self.cvx_problem = setup_cvx_problem(
             self.x_calib,
             self.scores_calib,
@@ -85,9 +90,13 @@ class CondConf:
         
         S = self.scores_calib.reshape(-1,1)
         Phi = self.phi_calib.astype(float)
-
         zeros = np.zeros((Phi.shape[1],))
-        bounds = [(quantile - 1, quantile)] * len(S)
+
+        if quantile is None:
+            bounds = np.concatenate((self.quantile_calib - 1, self.quantile_calib), axis=1)
+        else:
+            bounds = np.asarray([quantile - 1, quantile])
+            bounds = np.tile(bounds.reshape(1,-1), (len(S), 1))
         res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
         primal_vars = -1 * res.eqlin.marginals.reshape(-1,1)
         dual_vars = res.x.reshape(-1,1)
@@ -96,14 +105,14 @@ class CondConf:
     
     def _compute_exact_cutoff(
             self,
-            quantile,
+            quantiles,
             primals,
             duals,
             phi_test,
             dual_threshold
     ):
-        def get_current_basis(primals, duals, Phi, S, quantile):
-            interp_bools = np.logical_and(~np.isclose(duals, quantile - 1),~np.isclose(duals, quantile))
+        def get_current_basis(primals, duals, Phi, S, quantiles):
+            interp_bools = np.logical_and(~np.isclose(duals, quantiles - 1), ~np.isclose(duals, quantiles))
             if np.sum(interp_bools) == Phi.shape[1]:
                 return interp_bools
             preds = (Phi @ primals).flatten()
@@ -122,7 +131,7 @@ class CondConf:
                 interp_bools[diff_indices] = True
             return interp_bools
                 
-        basis = get_current_basis(primals, duals, self.phi_calib, self.scores_calib, quantile)
+        basis = get_current_basis(primals, duals, self.phi_calib, self.scores_calib, quantiles[:-1])
         S_test = phi_test @ primals
 
         duals = np.concatenate((duals.flatten(), [0]))
@@ -131,7 +140,6 @@ class CondConf:
         S = np.concatenate((self.scores_calib.reshape(-1,1), S_test.reshape(-1,1)), axis=0)
 
         candidate_idx = phi.shape[0] - 1
-
         while True:
             # get direction vector for dual variable step
             direction = -1 * np.linalg.solve(phi[basis].T, phi[candidate_idx].reshape(-1,1)).flatten()
@@ -148,26 +156,27 @@ class CondConf:
 
             if positive_step:
                 gap_to_bounds = np.maximum(
-                    (quantile - duals[active_basis]) / active_direction,
-                    ((quantile - 1) - duals[active_basis]) / active_direction
+                    (quantiles[active_basis].flatten() - duals[active_basis]) / active_direction,
+                    ((quantiles[active_basis].flatten() - 1) - duals[active_basis]) / active_direction
                 )
                 step_size = np.min(gap_to_bounds)
                 departing_idx = np.where(active_basis)[0][np.argmin(gap_to_bounds)]
             else:
                 gap_to_bounds = np.minimum(
-                    (quantile - duals[active_basis]) / active_direction,
-                    ((quantile - 1) - duals[active_basis]) / active_direction
+                    (quantiles[active_basis].flatten() - duals[active_basis]) / active_direction,
+                    ((quantiles[active_basis].flatten() - 1) - duals[active_basis]) / active_direction
                 )
                 step_size = np.max(gap_to_bounds)
                 departing_idx = np.where(active_basis)[0][np.argmax(gap_to_bounds)]
             step_size_clip = np.clip(
                 step_size, 
-                a_max=quantile - duals[candidate_idx], 
-                a_min=(quantile - 1) - duals[candidate_idx]
+                a_max=quantiles[candidate_idx] - duals[candidate_idx], 
+                a_min=(quantiles[candidate_idx] - 1) - duals[candidate_idx]
             )
 
             duals[basis] += step_size_clip * direction
             duals[candidate_idx] += step_size_clip
+            # print("Current value of final dual", duals[-1], "target threshold", dual_threshold)
 
             if dual_threshold > 0 and duals[-1] > dual_threshold:
                 break
@@ -188,12 +197,12 @@ class CondConf:
             bottom = reduced_A[-1]
             bottom[np.isclose(bottom, 0)] = np.inf
             req_change = reduced_costs / bottom
-            if dual_threshold >= 0:
+            if dual_threshold >= 0: #TODO: need to handle these cases separately I think...
                 ignore_entries = (np.isclose(bottom, 0) | np.asarray(req_change <= 1e-5))  
             else:
                 ignore_entries = (np.isclose(bottom, 0) | np.asarray(req_change >= -1e-5))  
             if np.sum(~ignore_entries) == 0:
-                S[-1] = np.inf if quantile >= 0.5 else -np.inf
+                S[-1] = np.inf if quantiles[-1] >= 0.5 else -np.inf
                 break
             if dual_threshold >= 0:
                 candidate_idx = np.where(~basis)[0][np.where(~ignore_entries, req_change, np.inf).argmin()]
@@ -239,29 +248,40 @@ class CondConf:
         -------
         prediction_set
         """
-        if randomize:
-            threshold = self.rng.uniform(low=quantile - 1, high=quantile)
+        if quantile is None:
+            quantile_test = self.quantile_fn(x_test).reshape(-1,1)
+            quantiles = np.concatenate((self.quantile_calib, quantile_test), axis=0)
         else:
-            if quantile < 0.5:
-                threshold = quantile - 1
+            quantile_test = quantile
+            quantiles = np.ones((len(self.scores_calib) + 1,1)) * quantile
+        if randomize:
+            threshold = self.rng.uniform(low=quantile_test - 1, high=quantile_test)
+        else:
+            if quantile_test < 0.5:
+                threshold = quantile_test - 1
             else:
-                threshold = quantile
+                threshold = quantile_test
         
         if exact:
             if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
                 raise ValueError("Exact computation doesn't support RKHS quantile regression for now.")
-            naive_duals, naive_primals = self._get_calibration_solution(
-                quantile
-            )
+            if np.allclose(quantiles[0], quantiles):
+                naive_duals, naive_primals = self._get_calibration_solution(
+                    quantiles.flatten()[0]
+                )
+            else:
+                naive_duals, naive_primals = self._get_calibration_solution(
+                    None
+                )
             score_cutoff = self._compute_exact_cutoff(
-                quantile,
+                quantiles,
                 naive_primals,
                 naive_duals,
                 self.Phi_fn(x_test),
                 threshold
             )
         else:
-            _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantile, threshold=threshold)
+            _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantiles, threshold=threshold)
 
             if S_min is None:
                 S_min = np.min(self.scores_calib)
@@ -270,9 +290,9 @@ class CondConf:
             lower, upper = binary_search(_solve, S_min, S_max * 2)
 
             if quantile < 0.5:
-                score_cutoff = self._get_threshold(lower, x_test, quantile)
+                score_cutoff = self._get_threshold(lower, x_test, quantiles)
             else:
-                score_cutoff = self._get_threshold(upper, x_test, quantile)
+                score_cutoff = self._get_threshold(upper, x_test, quantiles)
 
         return score_inv_fn(score_cutoff, x_test.reshape(-1,1))
 
@@ -393,7 +413,10 @@ class CondConf:
             Phi = self.phi_calib.astype(float)
             zeros = np.zeros((Phi.shape[1],))
 
-            bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
+            if quantile is None:
+                bounds = np.concatenate((self.quantile_calib - 1, self.quantile_calib), axis=1)
+            else:
+                bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
             res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
             beta = -1 * res.eqlin.marginals
             threshold = self.Phi_fn(x) @ beta
@@ -433,10 +456,15 @@ class CondConf:
         covers = []
         duals = []
 
+        if quantile is None:
+            quantiles = np.concatenate((self.quantile_calib, [[0.]]), axis=0).flatten()
+        else:
+            quantiles = quantile * np.ones((len(self.scores_calib) + 1, 1))
+
         if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):        
             for x_val, y_val in zip(x, y):
                 S_true = self.score_fn(x_val.reshape(1,-1), y_val)
-                eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantile)
+                eta = self._get_dual_solution(S_true[0], x_val.reshape(1,-1), quantiles) # no need to recompute quantiles
                 if randomize:
                     threshold = self.rng.uniform(low=quantile - 1, high=quantile)
                 elif quantile > 0.5:
@@ -452,11 +480,11 @@ class CondConf:
         else:
             for x_val, y_val in zip(x, y):
                 if randomize:
-                    threshold = self.rng.uniform(low=quantile - 1, high=quantile)
-                elif quantile > 0.5:
-                    threshold = quantile
+                    threshold = self.rng.uniform(low=quantiles[-1] - 1, high=quantiles[-1])
+                elif quantiles[-1] > 0.5:
+                    threshold = quantiles[-1]
                 else:
-                    threshold = quantile - 1
+                    threshold = quantiles[-1] - 1
 
                 S_true = self.score_fn(x_val.reshape(1,-1), y_val)
                 if resolve:
@@ -468,15 +496,15 @@ class CondConf:
                     duals.append(eta[-1])
                 else:
                     naive_duals, naive_primals = self._get_calibration_solution(
-                        quantile
+                        quantiles
                     )
                     score_cutoff = self._compute_exact_cutoff(
-                        quantile,
+                        quantiles,
                         naive_primals,
                         naive_duals,
                         self.Phi_fn(x_val),
                         threshold
-                    )            
+                    )
                     if quantile > 0.5:
                         covers.append(S_true < score_cutoff)
                     else:
@@ -490,14 +518,14 @@ class CondConf:
         self,
         S : float,
         x : np.ndarray,
-        quantile : float
+        quantiles : np.ndarray
     ):
         if self.infinite_params.get("kernel", FUNCTION_DEFAULTS['kernel']):
             prob = finish_dual_setup(
                 self.cvx_problem,
                 S,
                 x,
-                quantile,
+                quantiles[-1],
                 self.Phi_fn(x),
                 self.x_calib,
                 self.infinite_params
@@ -512,7 +540,7 @@ class CondConf:
             S = np.concatenate([self.scores_calib, [S]])
             Phi = np.concatenate([self.phi_calib, self.Phi_fn(x)], axis=0)
             zeros = np.zeros((Phi.shape[1],))
-            bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
+            bounds = np.concatenate((quantiles - 1, quantiles), axis=1)
             res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds,
                           method='highs-ds', options={'presolve': False})
             eta = res.x
@@ -523,14 +551,14 @@ class CondConf:
         self,
         S : float,
         x : np.ndarray,
-        quantile : float
+        quantiles : np.ndarray
     ):
         if self.infinite_params.get("kernel", FUNCTION_DEFAULTS['kernel']):
             prob = finish_dual_setup(
                 self.cvx_problem,
                 S,
                 x,
-                quantile,
+                quantiles[-1],
                 self.Phi_fn(x),
                 self.x_calib,
                 self.infinite_params
@@ -546,7 +574,7 @@ class CondConf:
             S = np.concatenate([self.scores_calib, [S]])
             Phi = np.concatenate([self.phi_calib, self.Phi_fn(x)], axis=0)
             zeros = np.zeros((Phi.shape[1],))
-            bounds = [(quantile - 1, quantile)] * (len(self.scores_calib) + 1)
+            bounds = np.concatenate((quantiles - 1, quantiles), axis=1)
             res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds,
                           method='highs-ds', options={'presolve': False})
             beta = -1 * res.eqlin.marginals
@@ -557,9 +585,9 @@ class CondConf:
         self,
         S : float,
         x : np.ndarray,
-        quantile : float
+        quantiles : np.ndarray
     ):
-        beta, weights = self._get_primal_solution(S, x, quantile)
+        beta, weights = self._get_primal_solution(S, x, quantiles)
 
         threshold = self.Phi_fn(x) @ beta
         if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
@@ -585,17 +613,17 @@ def binary_search(func, min, max, tol=1e-3):
     return min, max
 
 
-def _solve_dual(S, gcc, x_test, quantile, threshold=None):
-    prob = finish_dual_setup(
-        gcc.cvx_problem,
-        S,
-        x_test,
-        quantile,
-        gcc.Phi_fn(x_test),
-        gcc.x_calib,
-        gcc.infinite_params
-    )
+def _solve_dual(S, gcc, x_test, quantiles, threshold=None):
     if gcc.infinite_params.get('kernel', None):
+        prob = finish_dual_setup(
+            gcc.cvx_problem,
+            S,
+            x_test,
+            quantiles[-1],
+            gcc.Phi_fn(x_test),
+            gcc.x_calib,
+            gcc.infinite_params
+        )
         if "MOSEK" in cp.installed_solvers():
             prob.solve(solver="MOSEK")
         else:
@@ -606,16 +634,16 @@ def _solve_dual(S, gcc, x_test, quantile, threshold=None):
         Phi = np.concatenate([gcc.phi_calib, gcc.Phi_fn(x_test)], axis=0, dtype=float)
         zeros = np.zeros((Phi.shape[1],))
 
-        bounds = [(quantile - 1, quantile)] * (len(gcc.scores_calib) + 1)
+        bounds = np.concatenate((quantiles - 1, quantiles), axis=1)
         res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, 
                       method='highs', options={'presolve': False})
         weights = res.x
 
     if threshold is None:
-        if quantile < 0.5:
-            threshold = quantile - 1
+        if quantiles[-1] < 0.5:
+            threshold = quantiles[-1] - 1
         else:
-            threshold = quantile
+            threshold = quantiles[-1]
     # if quantile < 0.5:
     #     return weights[-1] + (1 - quantile)
     return weights[-1] - threshold

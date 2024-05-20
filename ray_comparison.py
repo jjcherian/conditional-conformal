@@ -39,13 +39,13 @@ if __name__ == "__main__":
     data.replace('?', pd.NA, inplace=True)  # Replace question marks with NaN
     data_cleaned = data.dropna(axis=1)
 
-    orig_features = ['population','racepctblack','racePctWhite','racePctAsian',
+    orig_features = ['intercept', 'population','racepctblack','racePctWhite','racePctAsian',
                 'racePctHisp','agePct12t21','agePct65up','medIncome','PctUnemployed','ViolentCrimesPerPop']
 
     # obtain all features except the metadata
     features = [c for c in data_cleaned.columns if c not in ['communityname', 'fold']]
 
-    dataSub = data_cleaned[features]
+    dataSub = data_cleaned[orig_features]
 
     X = dataSub.drop(['ViolentCrimesPerPop'],axis=1).to_numpy()
     Y = dataSub['ViolentCrimesPerPop'].to_numpy()

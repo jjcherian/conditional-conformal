@@ -153,13 +153,16 @@ def run_experiment(dataset, n_test, n_calib, alpha, methods = [], seed = 0):
     all_coverages = []
     # example methods: (BASE_METHOD)-(CONFORMAL_METHOD)
     # BASE_METHOD valid choices: "ols", "qr", "qrf"
-    # CONFORMAL_METHOD valid choices: "split", "cc", "ccrand", "lcp", "rlcp" (todo on last two)
+    # CONFORMAL_METHOD valid choices: "split", "cc", "ccrand", "lcp", "ccqp"
     for method in methods:
         base_method, conformal_method = method.split('-')
         reg = base_model[base_method]
-        if "q" in base_method: # if a quantile regression score needs to specify quantile
+        if "qrf" in base_method: # if a quantile regression score needs to specify quantile
             score_fn_upper = lambda x, y: y - reg.predict(x, 1 - alpha/2) + rng.uniform(0, 1e-5, size=len(x))
             score_fn_lower = lambda x, y: y - reg.predict(x, alpha/2) + rng.uniform(0, 1e-5, size=len(x))
+        elif "q" in base_method:
+            score_fn_upper = lambda x, y: y - reg.predict(x, 1 - alpha/2)
+            score_fn_lower = lambda x, y: y - reg.predict(x, alpha/2)
         else:
             score_fn_upper = lambda x, y: y - reg.predict(x)
             score_fn_lower = lambda x, y: y - reg.predict(x)
