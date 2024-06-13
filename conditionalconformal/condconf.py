@@ -87,7 +87,6 @@ class CondConf:
             self,
             quantile : float
     ):
-        
         S = self.scores_calib.reshape(-1,1)
         Phi = self.phi_calib.astype(float)
         zeros = np.zeros((Phi.shape[1],))
@@ -100,6 +99,9 @@ class CondConf:
         res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
         primal_vars = -1 * res.eqlin.marginals.reshape(-1,1)
         dual_vars = res.x.reshape(-1,1)
+
+        # TODO: there are weird cases where I don't interpolate p variables, and there is no clue how to find 
+        # the missing interpolant...
 
         return dual_vars, primal_vars
     
@@ -140,6 +142,7 @@ class CondConf:
         S = np.concatenate((self.scores_calib.reshape(-1,1), S_test.reshape(-1,1)), axis=0)
 
         candidate_idx = phi.shape[0] - 1
+        num_iters = 0
         while True:
             # get direction vector for dual variable step
             direction = -1 * np.linalg.solve(phi[basis].T, phi[candidate_idx].reshape(-1,1)).flatten()
@@ -210,6 +213,9 @@ class CondConf:
             else:
                 candidate_idx = np.where(~basis)[0][np.where(~ignore_entries, req_change, -np.inf).argmax()]
                 S[-1] += np.max(req_change[~ignore_entries])
+            num_iters += 1
+            if num_iters > 10000:
+                S[-1] = np.inf if dual_threshold > 0 else -1 * np.inf
         return S[-1]
 
     def predict(
