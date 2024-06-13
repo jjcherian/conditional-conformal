@@ -44,6 +44,7 @@ class CondConf:
             self, 
             score_fn : Callable,
             Phi_fn : Callable,
+	    quantile_fn : Callable = None,
             infinite_params : dict = {}
         ):
         """
@@ -62,6 +63,10 @@ class CondConf:
         Phi_fn : Callable[np.ndarray] -> np.ndarray
             Function that defines finite basis set that we provide
             exact conditional guarantees over
+
+	quantile_fn : Callable[np.ndarray] -> np.ndarray
+	    Function that defines data-dependent quantile we estimate
+	    that takes the same input as Phi_fn
 
         infinite_params : dict = {}
             Dictionary containing parameters for the RKHS component of the fit
@@ -106,7 +111,7 @@ class CondConf:
         Arguments
         ---------
         quantile : float
-            Nominal quantile level
+            Nominal quantile level / pass in None if quantile_fn is in use
         x_test : np.ndarray
             Single test point
         score_inv_fn : Callable[float, np.ndarray] -> .
