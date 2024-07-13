@@ -1,7 +1,7 @@
 # Conditional Conformal
 
 `conditionalconformal` is a Python package for conformal prediction with 
-conditional guarantees.
+conditional guarantees. This branch will support fast QP solving + GPU acceleration.
 
 For example, given a collection of groups $\mathcal{G}$, `conditionalconformal` issues
 a prediction set $\hat{C}(\cdot)$ satisfying
