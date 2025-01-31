@@ -226,7 +226,8 @@ class CondConf:
             S_min : float = None,
             S_max : float = None,
             randomize : bool = False,
-            exact : bool = True
+            exact : bool = True,
+            threshold : float = None
     ):
         """
         Returns the (conditionally valid) prediction set for a given 
@@ -260,13 +261,14 @@ class CondConf:
         else:
             quantile_test = quantile
             quantiles = np.ones((len(self.scores_calib) + 1,1)) * quantile
-        if randomize:
-            threshold = self.rng.uniform(low=quantile_test - 1, high=quantile_test)
-        else:
-            if quantile_test < 0.5:
-                threshold = quantile_test - 1
+        if threshold is None:
+            if randomize:
+                threshold = self.rng.uniform(low=quantile_test - 1, high=quantile_test)
             else:
-                threshold = quantile_test
+                if quantile_test < 0.5:
+                    threshold = quantile_test - 1
+                else:
+                    threshold = quantile_test
         
         if exact:
             if self.infinite_params.get('kernel', FUNCTION_DEFAULTS['kernel']):
@@ -287,7 +289,7 @@ class CondConf:
                 threshold
             )
         else:
-            _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantile=quantiles, threshold=threshold)
+            _solve = partial(_solve_dual, gcc=self, x_test=x_test, quantiles=quantiles, threshold=threshold)
 
             if S_min is None:
                 S_min = np.min(self.scores_calib)
@@ -359,7 +361,8 @@ class CondConf:
             )
         inner_prod = weights.T @ K @ fitted_weights
         expectation = np.mean(weights.T @ K)
-        penalty = self.infinite_params['lambda'] * (inner_prod / expectation)
+        #penalty = self.infinite_params['lambda'] * (inner_prod / expectation)
+        penalty = (1/(len(self.x_calib) + 1))*(inner_prod / expectation)
         return quantile - penalty
     
     def predict_naive(
@@ -436,7 +439,8 @@ class CondConf:
             quantile : float,
             randomize : bool = False,
             resolve : bool = False,
-            return_dual : bool = False
+            return_dual : bool = False,
+            eps : float = 0.001
     ):
         """
         In some experiments, we may simply be interested in verifying the coverage of our method.
@@ -474,9 +478,9 @@ class CondConf:
                 if randomize:
                     threshold = self.rng.uniform(low=quantile - 1, high=quantile)
                 elif quantile > 0.5:
-                    threshold = quantile
+                    threshold = quantile - eps
                 else:
-                    threshold = quantile - 1
+                    threshold = quantile - 1 + eps
                 if quantile > 0.5:
                     covers.append(eta[-1] < threshold)
                 else:
@@ -531,7 +535,7 @@ class CondConf:
                 self.cvx_problem,
                 S,
                 x,
-                quantiles[-1],
+                quantiles[-1][0],
                 self.Phi_fn(x),
                 self.x_calib,
                 self.infinite_params
@@ -541,7 +545,8 @@ class CondConf:
             else:
                 prob.solve()
             # TODO: THIS IS WRONG
-            raise ValueError("need to get variable out of problem and return its value")
+            #raise ValueError("need to get variable out of problem and return its value")
+            return prob.var_dict['weights'].value
         else:
             S = np.concatenate([self.scores_calib, [S]])
             Phi = np.concatenate([self.phi_calib, self.Phi_fn(x)], axis=0)
@@ -564,7 +569,7 @@ class CondConf:
                 self.cvx_problem,
                 S,
                 x,
-                quantiles[-1],
+                quantiles[-1][0],
                 self.Phi_fn(x),
                 self.x_calib,
                 self.infinite_params
@@ -625,7 +630,7 @@ def _solve_dual(S, gcc, x_test, quantiles, threshold=None):
             gcc.cvx_problem,
             S,
             x_test,
-            quantiles[-1],
+            quantiles[-1][0],
             gcc.Phi_fn(x_test),
             gcc.x_calib,
             gcc.infinite_params
@@ -691,7 +696,7 @@ def setup_cvx_problem(
             constraints
         )
     else: # RKHS fitting
-        radius = cp.Parameter(name="radius")        
+        radius = cp.Parameter(name="radius", nonneg=True)        
 
         _, L_11 = _get_kernel_matrix(x_calib, kernel, gamma)
     
@@ -705,11 +710,11 @@ def setup_cvx_problem(
 
         # this is really C * (quantile - 1) and C * quantile
         constraints = [
-            quantile - C <= eta,
+            (quantile - 1) <= eta,
             quantile >= eta,
             eta.T @ Phi == 0]
         prob = cp.Problem(
-                    cp.Minimize(0.5 * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
+                    cp.Minimize(0.5 * C * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
                     constraints
                 )
     return prob
@@ -770,7 +775,8 @@ def finish_dual_setup(
         prob.param_dict['radius'].value = radius
 
         # update quantile definition for silly cvxpy reasons
-        prob.param_dict['quantile'].value *= radius / (len(x_calib) + 1)
+        prob.param_dict['quantile'].value = quantile
+        #prob.param_dict['quantile'].value *= radius / (len(x_calib) + 1)
     
     return prob
 
@@ -812,11 +818,11 @@ def setup_cvx_problem_calib(
         C = radius / (n_calib + 1)
 
         constraints = [
-            C * (quantile - 1) <= eta,
-            C * quantile >= eta,
+             (quantile - 1) <= eta,
+             quantile >= eta,
             eta.T @ Phi == 0]
         prob = cp.Problem(
-                    cp.Minimize(0.5 * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
+                    cp.Minimize(0.5 * C * cp.sum_squares(L.T @ eta) - cp.sum(cp.multiply(eta, cp.vec(scores)))),
                     constraints
                 )
     return prob
