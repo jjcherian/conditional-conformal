@@ -506,7 +506,7 @@ class CondConf:
                     duals.append(eta[-1])
                 else:
                     naive_duals, naive_primals = self._get_calibration_solution(
-                        quantiles
+                        quantile
                     )
                     score_cutoff = self._compute_exact_cutoff(
                         quantiles,
