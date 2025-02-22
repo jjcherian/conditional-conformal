@@ -68,7 +68,21 @@ class CondConf:
         """
         self.x_calib = x_calib
         self.y_calib = y_calib
-        self.phi_calib = self.Phi_fn(x_calib)
+        phi_calib = self.Phi_fn(x_calib)
+
+        _, s, Vt = np.linalg.svd(phi_calib, full_matrices=False)
+        
+        # Set a tolerance to decide which singular values are nonzero
+        tol = 1e-10
+        r = np.sum(s > tol)
+
+        if r < len(s):
+            self.Phi_fn_orig = self.Phi_fn
+            T = Vt.T[:, :r]
+            self.Phi_fn = lambda x: (self.Phi_fn_orig(x) @ T)
+            phi_calib = self.Phi_fn(x_calib)
+        
+        self.phi_calib = phi_calib
         self.scores_calib = self.score_fn(x_calib, y_calib)
 
         if self.quantile_fn is not None:
@@ -132,6 +146,9 @@ class CondConf:
             else:
                 interp_bools[diff_indices] = True
             return interp_bools
+        
+        if np.allclose(phi_test, 0):
+            return np.inf if quantiles[-1] >= 0.5 else -np.inf
                 
         basis = get_current_basis(primals, duals, self.phi_calib, self.scores_calib, quantiles[:-1])
         S_test = phi_test @ primals
@@ -200,7 +217,7 @@ class CondConf:
             bottom = reduced_A[-1]
             bottom[np.isclose(bottom, 0)] = np.inf
             req_change = reduced_costs / bottom
-            if dual_threshold >= 0: #TODO: need to handle these cases separately I think...
+            if dual_threshold >= 0:
                 ignore_entries = (np.isclose(bottom, 0) | np.asarray(req_change <= 1e-5))  
             else:
                 ignore_entries = (np.isclose(bottom, 0) | np.asarray(req_change >= -1e-5))  
