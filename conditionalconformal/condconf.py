@@ -115,7 +115,7 @@ class CondConf:
         primal_vars = -1 * res.eqlin.marginals.reshape(-1,1)
         dual_vars = res.x.reshape(-1,1)
 
-        residuals = S - (Phi @ primal_vars).flatten()
+        residuals = S - (Phi @ primal_vars)
         interpolated_pts = np.isclose(residuals, 0)
 
         # if I didn't converge to a solution that interpolates at least Phi.shape[1] pts, 
@@ -123,10 +123,17 @@ class CondConf:
         if interpolated_pts.sum() < Phi.shape[1]:
             num_to_add = Phi.shape[1] - interpolated_pts.sum()
             for _ in range(num_to_add):
-                candidate_idx = np.where(~interpolated_pts)[0][0]
-                candidate_pts = interpolated_pts.copy()
+                candidate_pts = interpolated_pts.copy().flatten()
+
+                # find candidate idx for interpolation, e.g., new covariate that is
+                # linearly independent of the previously interpolated points
+                Q, _ = np.linalg.qr(Phi[candidate_pts].T)
+                projections = Phi @ Q @ Q.T
+                norms = np.linalg.norm(Phi - projections, axis=1)
+                candidate_idx = np.where(norms > 1e-5)[0][0]
                 candidate_pts[candidate_idx] = True
 
+                # find direction to solution that would interpolate the new point
                 gamma, _, _, _ = np.linalg.lstsq(Phi[candidate_pts], S[candidate_pts], rcond=None)
                 direction = gamma.reshape(-1,1) - primal_vars
                 step_sizes = residuals / (Phi @ direction)
@@ -138,7 +145,7 @@ class CondConf:
                 # take smallest possible step that would lead to interpolation
                 primal_vars += np.min(step_sizes[positive_indices]) * direction
 
-                residuals = S - (Phi @ primal_vars).flatten()
+                residuals = S - (Phi @ primal_vars)
                 interpolated_pts = np.isclose(residuals, 0)
 
         return dual_vars, primal_vars
