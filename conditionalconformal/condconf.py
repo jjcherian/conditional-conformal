@@ -110,7 +110,7 @@ class CondConf:
         else:
             bounds = np.asarray([quantile - 1, quantile])
             bounds = np.tile(bounds.reshape(1,-1), (len(S), 1))
-            
+
         res = linprog(-1 * S, A_eq=Phi.T, b_eq=zeros, bounds=bounds, method='highs')
         primal_vars = -1 * res.eqlin.marginals.reshape(-1,1)
         dual_vars = res.x.reshape(-1,1)
@@ -121,11 +121,9 @@ class CondConf:
         # if I didn't converge to a solution that interpolates at least Phi.shape[1] pts, 
         # I need to manually find one via a modified simplex iteration
         if interpolated_pts.sum() < Phi.shape[1]:
-            nonbasic_vars = np.where(~interpolated_pts)[0]
-
-            i = 0
-            candidate_idx = nonbasic_vars[i]
-            while interpolated_pts.sum() < Phi.shape[1]:
+            num_to_add = Phi.shape[1] - interpolated_pts.sum()
+            for _ in range(num_to_add):
+                candidate_idx = np.where(~interpolated_pts)[0][0]
                 candidate_pts = interpolated_pts.copy()
                 candidate_pts[candidate_idx] = True
 
@@ -135,20 +133,13 @@ class CondConf:
 
                 # check the non-basic indices for which a step in this direction could have led to interpolation
                 # e.g., those for which the step size is positive and the point is not already interpolated
-                positive_indices = np.where((step_sizes > 0) & ~candidate_pts)[0]
+                positive_indices = np.where((step_sizes > 0) & ~interpolated_pts)[0]
 
-                if len(positive_indices) > 0 and np.min(step_sizes[positive_indices]) < 1:
-                    # Get the index of the smallest positive value
-                    min_index = positive_indices[np.argmin(step_sizes[positive_indices])]
-                    step_size = np.min(step_sizes[positive_indices])
-                else:
-                    min_index = candidate_idx
-                    step_size = 1
-                    i += 1
-                    candidate_idx = nonbasic_vars[i]
+                # take smallest possible step that would lead to interpolation
+                primal_vars += np.min(step_sizes[positive_indices]) * direction
 
-                interpolated_pts[min_index] = True
-                primal_vars += step_size * direction
+                residuals = S - (Phi @ primal_vars).flatten()
+                interpolated_pts = np.isclose(residuals, 0)
 
         return dual_vars, primal_vars
     
