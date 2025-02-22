@@ -145,6 +145,8 @@ class CondConf:
                         break
             else:
                 interp_bools[diff_indices] = True
+            if np.sum(interp_bools) != Phi.shape[1]:
+                raise ValueError("Could not find a suitable basis - retry without exact.")
             return interp_bools
         
         if np.allclose(phi_test, 0):
